@@ -41,6 +41,58 @@ export function withFadeOutHold(clip: Clip, holdDuration: number): Effect[] {
   ];
 }
 
+export interface ColorAdjust {
+  brightness: number;
+  contrast: number;
+  saturation: number;
+}
+
+/** Brightness/contrast/saturation adjustment for a clip. All three are on a
+ * -100..100 scale where 0 means "unchanged". Stored as a single
+ * `brightness-contrast` effect entry, added lazily. */
+export function getColorAdjust(clip: Clip): ColorAdjust {
+  const e = clip.effects.find((e) => e.type === "brightness-contrast");
+  return {
+    brightness: e?.params.brightness ?? 0,
+    contrast: e?.params.contrast ?? 0,
+    saturation: e?.params.saturation ?? 0,
+  };
+}
+
+export function withColorAdjust(clip: Clip, patch: Partial<ColorAdjust>): Effect[] {
+  const merged = { ...getColorAdjust(clip), ...patch };
+  const others = clip.effects.filter((e) => e.type !== "brightness-contrast");
+  if (merged.brightness === 0 && merged.contrast === 0 && merged.saturation === 0) {
+    return others;
+  }
+  return [...others, { id: "brightness-contrast", type: "brightness-contrast", params: merged }];
+}
+
+/** CSS `filter` value for previewing a clip's color adjust on a <video>/<canvas>
+ * element. Returns "none" when there's nothing to apply. */
+export function cssColorFilter(clip: Clip | undefined): string {
+  if (!clip) return "none";
+  const { brightness, contrast, saturation } = getColorAdjust(clip);
+  if (brightness === 0 && contrast === 0 && saturation === 0) return "none";
+  return `brightness(${1 + brightness / 100}) contrast(${1 + contrast / 100}) saturate(${1 + saturation / 100})`;
+}
+
+/** 0..1..0 easing envelope for a slide/zoom text entrance+exit animation:
+ * ramps up over `animDuration` seconds at the start of the clip, stays at 1,
+ * then ramps back down over `animDuration` seconds at the end. Independent
+ * from (and multiplicative with) fade opacity. */
+export function computeAnimProgress(
+  localTime: number,
+  clipDuration: number,
+  animDuration: number
+): number {
+  if (animDuration <= 0) return 1;
+  const inProgress = Math.min(1, Math.max(0, localTime / animDuration));
+  const timeFromEnd = clipDuration - localTime;
+  const outProgress = Math.min(1, Math.max(0, timeFromEnd / animDuration));
+  return Math.min(inProgress, outProgress);
+}
+
 /** Opacity/volume multiplier (0..1) for a point `localTime` seconds into a
  * clip whose (trimmed) duration is `clipDuration` seconds, given its fade
  * in/out settings. Fade-out ramps down to black over `fadeOut` seconds and

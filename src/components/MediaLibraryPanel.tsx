@@ -1,4 +1,4 @@
-import { type DragEvent } from "react";
+import { useState, type DragEvent } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { useUiStore } from "../store/uiStore";
 import { useT } from "../i18n/useLang";
@@ -28,6 +28,7 @@ export function MediaLibraryPanel() {
   const selectAsset = useProjectStore((s) => s.selectAsset);
   const addClipToTrack = useProjectStore((s) => s.addClipToTrack);
   const tracks = useProjectStore((s) => s.project.tracks);
+  const [importing, setImporting] = useState(false);
 
   const visibleAssets =
     activePanel === "media"
@@ -37,58 +38,68 @@ export function MediaLibraryPanel() {
   async function handleImport() {
     const files = await window.mdcut.openMediaFiles();
     if (files.length === 0) return;
-    const assets: MediaAsset[] = [];
-    for (const f of files) {
-      const kind = kindFromExt(f.ext);
-      const duration = await probeMediaDuration(f.fileUrl, kind);
-      const thumbnailUrl =
-        kind === "image"
-          ? f.fileUrl
-          : kind === "video"
-            ? await generateVideoThumbnail(f.fileUrl)
-            : null;
-      assets.push({
-        id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        kind,
-        name: f.name,
-        filePath: f.filePath,
-        fileUrl: f.fileUrl,
-        duration,
-        thumbnailUrl,
-      });
+    setImporting(true);
+    try {
+      const assets: MediaAsset[] = [];
+      for (const f of files) {
+        const kind = kindFromExt(f.ext);
+        const duration = await probeMediaDuration(f.fileUrl, kind);
+        const thumbnailUrl =
+          kind === "image"
+            ? f.fileUrl
+            : kind === "video"
+              ? await generateVideoThumbnail(f.fileUrl)
+              : null;
+        assets.push({
+          id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          kind,
+          name: f.name,
+          filePath: f.filePath,
+          fileUrl: f.fileUrl,
+          duration,
+          thumbnailUrl,
+        });
+      }
+      addMediaAssets(assets);
+    } finally {
+      setImporting(false);
     }
-    addMediaAssets(assets);
   }
 
   async function handleExternalDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault();
     const files = Array.from(e.dataTransfer.files);
     if (files.length === 0) return;
-    const assets: MediaAsset[] = [];
-    for (const file of files) {
-      const filePath = window.mdcut.getPathForFile(file);
-      if (!filePath) continue;
-      const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
-      const kind = kindFromExt(ext);
-      const fileUrl = await window.mdcut.resolveFileUrl(filePath);
-      const duration = await probeMediaDuration(fileUrl, kind);
-      const thumbnailUrl =
-        kind === "image"
-          ? fileUrl
-          : kind === "video"
-            ? await generateVideoThumbnail(fileUrl)
-            : null;
-      assets.push({
-        id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        kind,
-        name: file.name,
-        filePath,
-        fileUrl,
-        duration,
-        thumbnailUrl,
-      });
+    setImporting(true);
+    try {
+      const assets: MediaAsset[] = [];
+      for (const file of files) {
+        const filePath = window.mdcut.getPathForFile(file);
+        if (!filePath) continue;
+        const ext = filePath.split(".").pop()?.toLowerCase() ?? "";
+        const kind = kindFromExt(ext);
+        const fileUrl = await window.mdcut.resolveFileUrl(filePath);
+        const duration = await probeMediaDuration(fileUrl, kind);
+        const thumbnailUrl =
+          kind === "image"
+            ? fileUrl
+            : kind === "video"
+              ? await generateVideoThumbnail(fileUrl)
+              : null;
+        assets.push({
+          id: `asset-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+          kind,
+          name: file.name,
+          filePath,
+          fileUrl,
+          duration,
+          thumbnailUrl,
+        });
+      }
+      if (assets.length > 0) addMediaAssets(assets);
+    } finally {
+      setImporting(false);
     }
-    if (assets.length > 0) addMediaAssets(assets);
   }
 
   function handleAddText() {
@@ -140,7 +151,13 @@ export function MediaLibraryPanel() {
         )}
       </div>
 
-      {activePanel !== "text" && visibleAssets.length === 0 && (
+      {importing && (
+        <p className="hint importing-hint">
+          <span className="spinner" /> {t("importingFiles")}
+        </p>
+      )}
+
+      {!importing && activePanel !== "text" && visibleAssets.length === 0 && (
         <p className="hint">{t("emptyLibrary")}</p>
       )}
 
@@ -165,7 +182,7 @@ export function MediaLibraryPanel() {
                 )}
                 <button
                   className="asset-delete-btn"
-                  title="Xóa khỏi thư viện"
+                  title={t("removeFromLibrary")}
                   onClick={(e) => {
                     e.stopPropagation();
                     deleteMediaAsset(asset.id);

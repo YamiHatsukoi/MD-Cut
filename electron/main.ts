@@ -169,6 +169,8 @@ interface RawTextOverlay {
   outlineEnabled?: boolean;
   outlineColor?: string;
   outlineWidth?: number;
+  animation?: "none" | "slide" | "zoom";
+  animationDuration?: number;
 }
 
 ipcMain.handle(
@@ -214,6 +216,8 @@ ipcMain.handle(
         outlineEnabled: t.outlineEnabled,
         outlineColor: t.outlineColor,
         outlineWidth: t.outlineWidth,
+        animation: t.animation,
+        animationDuration: t.animationDuration,
       };
     });
 
@@ -238,6 +242,49 @@ ipcMain.handle(
 
 ipcMain.handle("shell:showItemInFolder", (_event, filePath: string) => {
   shell.showItemInFolder(filePath);
+});
+
+ipcMain.handle("files:checkExist", (_event, filePaths: string[]) =>
+  filePaths.filter((p) => !fs.existsSync(p))
+);
+
+const RECENT_PROJECTS_PATH = path.join(app.getPath("userData"), "recent-projects.json");
+const MAX_RECENT_PROJECTS = 10;
+
+interface RecentProjectEntry {
+  filePath: string;
+  name: string;
+  openedAt: number;
+}
+
+function readRecentProjects(): RecentProjectEntry[] {
+  if (!fs.existsSync(RECENT_PROJECTS_PATH)) return [];
+  try {
+    const list = JSON.parse(fs.readFileSync(RECENT_PROJECTS_PATH, "utf-8")) as RecentProjectEntry[];
+    return list.filter((e) => fs.existsSync(e.filePath));
+  } catch {
+    return [];
+  }
+}
+
+ipcMain.handle("recentProjects:list", () => readRecentProjects());
+
+ipcMain.handle("recentProjects:add", (_event, filePath: string, name: string) => {
+  const existing = readRecentProjects().filter((e) => e.filePath !== filePath);
+  const updated = [{ filePath, name, openedAt: Date.now() }, ...existing].slice(
+    0,
+    MAX_RECENT_PROJECTS
+  );
+  fs.writeFileSync(RECENT_PROJECTS_PATH, JSON.stringify(updated), "utf-8");
+});
+
+ipcMain.handle("recentProjects:open", (_event, filePath: string) => {
+  if (!fs.existsSync(filePath)) return null;
+  try {
+    return { filePath, json: fs.readFileSync(filePath, "utf-8") };
+  } catch {
+    return null;
+  }
 });
 
 const AUTOSAVE_PATH = path.join(app.getPath("userData"), "autosave.mdcut.json");

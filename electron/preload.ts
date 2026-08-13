@@ -20,6 +20,12 @@ export interface ExportVideoClipInput {
   scale?: number;
   xPct?: number;
   yPct?: number;
+  rotation?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  speed?: number;
+  muted?: boolean;
 }
 
 export interface ExportAudioOverlayInput {
@@ -31,6 +37,7 @@ export interface ExportAudioOverlayInput {
   fadeIn?: number;
   fadeOut?: number;
   fadeOutHold?: number;
+  speed?: number;
 }
 
 export interface ExportTextOverlayInput {
@@ -49,6 +56,8 @@ export interface ExportTextOverlayInput {
   outlineEnabled?: boolean;
   outlineColor?: string;
   outlineWidth?: number;
+  animation?: "none" | "slide" | "zoom";
+  animationDuration?: number;
 }
 
 export interface ExportImageOverlayInput {
@@ -61,6 +70,10 @@ export interface ExportImageOverlayInput {
   fadeIn?: number;
   fadeOut?: number;
   fadeOutHold?: number;
+  rotation?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
 }
 
 export interface ExportSettingsInput {
@@ -78,6 +91,12 @@ export interface ExportResult {
 export interface CustomFont {
   name: string;
   fileUrl: string;
+}
+
+export interface RecentProjectEntry {
+  filePath: string;
+  name: string;
+  openedAt: number;
 }
 
 const api = {
@@ -119,6 +138,14 @@ const api = {
   autosaveWrite: (json: string): Promise<void> => ipcRenderer.invoke("autosave:write", json),
   autosaveRead: (): Promise<string | null> => ipcRenderer.invoke("autosave:read"),
   autosaveClear: (): Promise<void> => ipcRenderer.invoke("autosave:clear"),
+  checkFilesExist: (filePaths: string[]): Promise<string[]> =>
+    ipcRenderer.invoke("files:checkExist", filePaths),
+  recentProjectsList: (): Promise<RecentProjectEntry[]> =>
+    ipcRenderer.invoke("recentProjects:list"),
+  recentProjectsAdd: (filePath: string, name: string): Promise<void> =>
+    ipcRenderer.invoke("recentProjects:add", filePath, name),
+  recentProjectsOpen: (filePath: string): Promise<{ filePath: string; json: string } | null> =>
+    ipcRenderer.invoke("recentProjects:open", filePath),
 };
 
 export type MdCutApi = typeof api;

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from 
 import { useProjectStore } from "../store/projectStore";
 import { getProjectDuration } from "../lib/projectDuration";
 import { formatTime } from "../lib/format";
-import { computeFadeFactor } from "../lib/effects";
+import { computeFadeFactor, cssColorFilter, computeAnimProgress } from "../lib/effects";
 import type { Clip } from "../types";
 
 const RESYNC_THRESHOLD = 0.25;
@@ -49,12 +49,14 @@ export function PreviewPlayer() {
   const textTrack = project.tracks.find((t) => t.type === "text");
   const imageTrack = project.tracks.find((t) => t.type === "image");
 
-  const activeVideoClip = findActiveClip(videoTrack?.clips, playheadTime);
-  const activeAudioClip = findActiveClip(audioTrack?.clips, playheadTime);
-  const activeTextClips =
-    textTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? [];
-  const activeImageClips =
-    imageTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? [];
+  const activeVideoClip = videoTrack?.hidden ? undefined : findActiveClip(videoTrack?.clips, playheadTime);
+  const activeAudioClip = audioTrack?.hidden ? undefined : findActiveClip(audioTrack?.clips, playheadTime);
+  const activeTextClips = textTrack?.hidden
+    ? []
+    : (textTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? []);
+  const activeImageClips = imageTrack?.hidden
+    ? []
+    : (imageTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? []);
 
   const activeVideoAsset = activeVideoClip
     ? project.mediaLibrary.find((a) => a.id === activeVideoClip.assetId)
@@ -75,7 +77,9 @@ export function PreviewPlayer() {
   const videoScale = activeVideoClip?.transform?.scale ?? 1;
   const videoXPct = activeVideoClip?.transform?.x ?? 50;
   const videoYPct = activeVideoClip?.transform?.y ?? 50;
-  const videoTransform = `translate(${videoXPct - 50}%, ${videoYPct - 50}%) scale(${videoScale})`;
+  const videoRotation = activeVideoClip?.transform?.rotation ?? 0;
+  const videoTransform = `translate(${videoXPct - 50}%, ${videoYPct - 50}%) scale(${videoScale}) rotate(${videoRotation}deg)`;
+  const videoFilter = cssColorFilter(activeVideoClip);
 
   // --- master clock: drives playheadTime forward while playing ---
   useEffect(() => {
@@ -115,7 +119,11 @@ export function PreviewPlayer() {
       video.src = activeVideoAsset.fileUrl;
       video.dataset.assetId = activeVideoAsset.id;
     }
-    const targetTime = playheadTime - activeVideoClip.timelineStart + activeVideoClip.trimIn;
+    const speed = activeVideoClip.speed ?? 1;
+    video.playbackRate = speed;
+    video.muted = videoTrack?.muted ?? false;
+    const targetTime =
+      (playheadTime - activeVideoClip.timelineStart) * speed + activeVideoClip.trimIn;
     if (!isPlaying || Math.abs(video.currentTime - targetTime) > RESYNC_THRESHOLD) {
       video.currentTime = targetTime;
     }
@@ -124,13 +132,13 @@ export function PreviewPlayer() {
     } else {
       video.pause();
     }
-  }, [playheadTime, isPlaying, activeVideoClip?.id, activeVideoAsset?.id]);
+  }, [playheadTime, isPlaying, activeVideoClip?.id, activeVideoAsset?.id, videoTrack?.muted]);
 
   // --- keep <audio> element in sync with the active audio clip / playhead ---
   useEffect(() => {
     const audio = audioRef.current;
     if (!audio) return;
-    if (!activeAudioClip || !activeAudioAsset) {
+    if (!activeAudioClip || !activeAudioAsset || audioTrack?.muted) {
       audio.pause();
       return;
     }
@@ -144,7 +152,10 @@ export function PreviewPlayer() {
       activeAudioClip.timelineEnd - activeAudioClip.timelineStart
     );
     audio.volume = (activeAudioClip.volume ?? 1) * fade;
-    const targetTime = playheadTime - activeAudioClip.timelineStart + activeAudioClip.trimIn;
+    const speed = activeAudioClip.speed ?? 1;
+    audio.playbackRate = speed;
+    const targetTime =
+      (playheadTime - activeAudioClip.timelineStart) * speed + activeAudioClip.trimIn;
     if (!isPlaying || Math.abs(audio.currentTime - targetTime) > RESYNC_THRESHOLD) {
       audio.currentTime = targetTime;
     }
@@ -153,7 +164,7 @@ export function PreviewPlayer() {
     } else {
       audio.pause();
     }
-  }, [playheadTime, isPlaying, activeAudioClip?.id, activeAudioAsset?.id]);
+  }, [playheadTime, isPlaying, activeAudioClip?.id, activeAudioAsset?.id, audioTrack?.muted]);
 
   // --- canvas overlay: text + image clips active at the current time ---
   useEffect(() => {
@@ -202,6 +213,7 @@ export function PreviewPlayer() {
         const scale = clip.transform?.scale ?? 1;
         const xPct = clip.transform?.x ?? 50;
         const yPct = clip.transform?.y ?? 50;
+        const rotation = clip.transform?.rotation ?? 0;
         const w = canvas.width * 0.4 * scale;
         const h = w * (img.naturalHeight / img.naturalWidth);
         const cx = (xPct / 100) * canvas.width;
@@ -211,9 +223,13 @@ export function PreviewPlayer() {
           playheadTime - clip.timelineStart,
           clip.timelineEnd - clip.timelineStart
         );
+        ctx.save();
         ctx.globalAlpha = fade;
-        ctx.drawImage(img, cx - w / 2, cy - h / 2, w, h);
-        ctx.globalAlpha = 1;
+        ctx.filter = cssColorFilter(clip);
+        ctx.translate(cx, cy);
+        if (rotation) ctx.rotate((rotation * Math.PI) / 180);
+        ctx.drawImage(img, -w / 2, -h / 2, w, h);
+        ctx.restore();
         boxes.push({
           trackId: imageTrack!.id,
           clipId: clip.id,
@@ -232,14 +248,29 @@ export function PreviewPlayer() {
       ctx.font = `${txt.fontSize}px ${txt.fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
-      const fade = computeFadeFactor(
-        clip,
-        playheadTime - clip.timelineStart,
-        clip.timelineEnd - clip.timelineStart
-      );
-      ctx.globalAlpha = fade;
+      const localTime = playheadTime - clip.timelineStart;
+      const clipDuration = clip.timelineEnd - clip.timelineStart;
+      const fade = computeFadeFactor(clip, localTime, clipDuration);
       const cx = (txt.x / 100) * canvas.width;
       const cy = (txt.y / 100) * canvas.height;
+
+      const animType = txt.animation ?? "none";
+      const animDur = txt.animationDuration ?? 0.4;
+      const animProgress =
+        animType === "none" ? 1 : computeAnimProgress(localTime, clipDuration, animDur);
+      let localX = 0;
+      let localY = 0;
+      let localScale = 1;
+      if (animType === "slide") {
+        localY = (1 - animProgress) * canvas.height * 0.15;
+      } else if (animType === "zoom") {
+        localScale = 0.4 + 0.6 * animProgress;
+      }
+
+      ctx.save();
+      ctx.globalAlpha = fade;
+      ctx.translate(cx + localX, cy + localY);
+      ctx.scale(localScale, localScale);
 
       // Always reset shadow/stroke state first — canvas state otherwise
       // leaks between clips drawn in the same pass.
@@ -259,7 +290,7 @@ export function PreviewPlayer() {
         ctx.strokeStyle = txt.outlineColor ?? "#000000";
         ctx.lineWidth = txt.outlineWidth ?? 3;
         ctx.lineJoin = "round";
-        ctx.strokeText(txt.content, cx, cy);
+        ctx.strokeText(txt.content, 0, 0);
         // shadow already rendered via the outline stroke — clear it so the
         // fill drawn on top doesn't double it up
         ctx.shadowColor = "transparent";
@@ -269,12 +300,8 @@ export function PreviewPlayer() {
       }
 
       ctx.fillStyle = txt.color;
-      ctx.fillText(txt.content, cx, cy);
-      ctx.shadowColor = "transparent";
-      ctx.shadowBlur = 0;
-      ctx.shadowOffsetX = 0;
-      ctx.shadowOffsetY = 0;
-      ctx.globalAlpha = 1;
+      ctx.fillText(txt.content, 0, 0);
+      ctx.restore();
       const textWidth = ctx.measureText(txt.content).width;
       const textHeight = txt.fontSize * 1.2;
       boxes.push({
@@ -320,8 +347,12 @@ export function PreviewPlayer() {
         point.yPx >= b.yPx &&
         point.yPx <= b.yPx + b.hPx
       ) {
+        useProjectStore.getState().selectClip(b.clipId, {
+          additive: e.ctrlKey || e.metaKey || e.shiftKey,
+        });
+        const owningTrack = project.tracks.find((tr) => tr.id === b.trackId);
+        if (owningTrack?.locked) return;
         dragRef.current = { trackId: b.trackId, clipId: b.clipId, kind: b.kind, snapshotted: false };
-        useProjectStore.getState().selectClip(b.clipId);
         window.addEventListener("mousemove", onCanvasMouseMove);
         window.addEventListener("mouseup", onCanvasMouseUp);
         return;
@@ -383,7 +414,7 @@ export function PreviewPlayer() {
           <video
             ref={videoRef}
             className="preview-video"
-            style={{ opacity: videoOpacity, transform: videoTransform }}
+            style={{ opacity: videoOpacity, transform: videoTransform, filter: videoFilter }}
             playsInline
           />
           <canvas

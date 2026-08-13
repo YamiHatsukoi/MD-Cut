@@ -58,16 +58,17 @@ export function clampMove(
 export function clampTrimLeft(
   clip: Clip,
   siblings: Clip[],
-  deltaSeconds: number
+  deltaSeconds: number,
+  speed = 1
 ): { timelineStart: number; trimIn: number } {
   const min = Math.max(
     prevSiblingEnd(clip, siblings),
-    clip.timelineStart - clip.trimIn
+    clip.timelineStart - clip.trimIn / speed
   );
   const max = clip.timelineEnd - MIN_CLIP_DURATION;
   const timelineStart = clamp(clip.timelineStart + deltaSeconds, min, max);
   const applied = timelineStart - clip.timelineStart;
-  return { timelineStart, trimIn: clip.trimIn + applied };
+  return { timelineStart, trimIn: clip.trimIn + applied * speed };
 }
 
 /** Snaps `value` to the closest of `targets` if within `threshold`, else
@@ -99,15 +100,43 @@ export function clampTrimRight(
   clip: Clip,
   siblings: Clip[],
   deltaSeconds: number,
-  assetDuration: number | null
+  assetDuration: number | null,
+  speed = 1
 ): { timelineEnd: number; trimOut: number } {
   const maxByTrim =
     assetDuration != null
-      ? clip.timelineEnd + (assetDuration - clip.trimOut)
+      ? clip.timelineEnd + (assetDuration - clip.trimOut) / speed
       : Infinity;
   const max = Math.min(nextSiblingStart(clip, siblings), maxByTrim);
   const min = clip.timelineStart + MIN_CLIP_DURATION;
   const timelineEnd = clamp(clip.timelineEnd + deltaSeconds, min, max);
   const applied = timelineEnd - clip.timelineEnd;
-  return { timelineEnd, trimOut: clip.trimOut + applied };
+  return { timelineEnd, trimOut: clip.trimOut + applied * speed };
+}
+
+/** Removes `removedIds` from `clips`. When `ripple` is true, every remaining
+ * clip is shifted left by the total duration of all removed clips that sat
+ * before it (in timelineStart order) — closing each deleted clip's own gap
+ * while leaving any other pre-existing gaps untouched. */
+export function rippleCompactClips(
+  clips: Clip[],
+  removedIds: Set<string>,
+  ripple: boolean
+): Clip[] {
+  if (!ripple) return clips.filter((c) => !removedIds.has(c.id));
+  const sorted = [...clips].sort((a, b) => a.timelineStart - b.timelineStart);
+  let shift = 0;
+  const result: Clip[] = [];
+  for (const c of sorted) {
+    if (removedIds.has(c.id)) {
+      shift += c.timelineEnd - c.timelineStart;
+      continue;
+    }
+    result.push(
+      shift > 0
+        ? { ...c, timelineStart: c.timelineStart - shift, timelineEnd: c.timelineEnd - shift }
+        : c
+    );
+  }
+  return result;
 }

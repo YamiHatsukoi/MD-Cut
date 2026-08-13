@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import type { Clip, MediaAsset, Project, Track, Transition } from "../types";
-import { splitClip, clampMove } from "../lib/timelineMath";
+import { splitClip, clampMove, rippleCompactClips } from "../lib/timelineMath";
 
 const MAX_HISTORY = 50;
 const DEFAULT_TRANSITION_DURATION = 0.5;
@@ -32,12 +32,15 @@ interface ProjectState {
   future: Project[];
   playheadTime: number;
   selectedClipId: string | null;
+  selectedClipIds: string[];
   selectedAssetId: string | null;
   clipboardClip: Clip | null;
   isPlaying: boolean;
+  rippleEnabled: boolean;
   setPlayheadTime: (t: number) => void;
   setIsPlaying: (playing: boolean) => void;
-  selectClip: (id: string | null) => void;
+  setRippleEnabled: (v: boolean) => void;
+  selectClip: (id: string | null, opts?: { additive?: boolean }) => void;
   selectAsset: (id: string | null) => void;
   updateTrack: (trackId: string, updater: (track: Track) => Track) => void;
   updateClip: (
@@ -50,9 +53,13 @@ interface ProjectState {
   addClipToTrack: (trackId: string, clip: Clip) => void;
   splitClipAt: (trackId: string, clipId: string, atTime: number) => void;
   deleteClip: (trackId: string, clipId: string) => void;
+  deleteSelectedClips: () => void;
   copyClip: (clip: Clip) => void;
   pasteClip: () => void;
   toggleTransition: (afterClipId: string) => void;
+  toggleTrackLocked: (trackId: string) => void;
+  toggleTrackHidden: (trackId: string) => void;
+  toggleTrackMuted: (trackId: string) => void;
   pushHistory: () => void;
   undo: () => void;
   redo: () => void;
@@ -66,13 +73,31 @@ export const useProjectStore = create<ProjectState>((set) => ({
   future: [],
   playheadTime: 0,
   selectedClipId: null,
+  selectedClipIds: [],
   selectedAssetId: null,
   clipboardClip: null,
   isPlaying: false,
+  rippleEnabled: false,
   setPlayheadTime: (t) => set({ playheadTime: t }),
   setIsPlaying: (playing) => set({ isPlaying: playing }),
-  selectClip: (id) => set({ selectedClipId: id, selectedAssetId: null }),
-  selectAsset: (id) => set({ selectedAssetId: id, selectedClipId: null }),
+  setRippleEnabled: (v) => set({ rippleEnabled: v }),
+  selectClip: (id, opts) =>
+    set((state) => {
+      if (!opts?.additive) {
+        return { selectedClipId: id, selectedClipIds: id ? [id] : [], selectedAssetId: null };
+      }
+      if (id == null) return state;
+      const has = state.selectedClipIds.includes(id);
+      const selectedClipIds = has
+        ? state.selectedClipIds.filter((cid) => cid !== id)
+        : [...state.selectedClipIds, id];
+      return {
+        selectedClipIds,
+        selectedClipId: selectedClipIds.length > 0 ? id : null,
+        selectedAssetId: null,
+      };
+    }),
+  selectAsset: (id) => set({ selectedAssetId: id, selectedClipId: null, selectedClipIds: [] }),
 
   // Continuous mutators (drag, live text edit) — do NOT push history themselves.
   // Callers are responsible for calling pushHistory() once at the start of a gesture.
@@ -173,20 +198,43 @@ export const useProjectStore = create<ProjectState>((set) => ({
       };
     }),
   deleteClip: (trackId, clipId) =>
-    set((state) => ({
-      project: {
-        ...state.project,
-        tracks: state.project.tracks.map((t) =>
-          t.id !== trackId
-            ? t
-            : { ...t, clips: t.clips.filter((c) => c.id !== clipId) }
-        ),
-        transitions: state.project.transitions.filter((t) => t.afterClipId !== clipId),
-      },
-      past: pushHistoryEntry(state.past, state.project),
-      future: [],
-      selectedClipId: null,
-    })),
+    set((state) => {
+      const removed = new Set([clipId]);
+      return {
+        project: {
+          ...state.project,
+          tracks: state.project.tracks.map((t) =>
+            t.id !== trackId
+              ? t
+              : { ...t, clips: rippleCompactClips(t.clips, removed, state.rippleEnabled) }
+          ),
+          transitions: state.project.transitions.filter((t) => t.afterClipId !== clipId),
+        },
+        past: pushHistoryEntry(state.past, state.project),
+        future: [],
+        selectedClipId: null,
+        selectedClipIds: [],
+      };
+    }),
+  deleteSelectedClips: () =>
+    set((state) => {
+      const removed = new Set(state.selectedClipIds);
+      if (removed.size === 0) return state;
+      return {
+        project: {
+          ...state.project,
+          tracks: state.project.tracks.map((t) => ({
+            ...t,
+            clips: rippleCompactClips(t.clips, removed, state.rippleEnabled),
+          })),
+          transitions: state.project.transitions.filter((t) => !removed.has(t.afterClipId)),
+        },
+        past: pushHistoryEntry(state.past, state.project),
+        future: [],
+        selectedClipId: null,
+        selectedClipIds: [],
+      };
+    }),
   copyClip: (clip) => set({ clipboardClip: clip }),
   pasteClip: () =>
     set((state) => {
@@ -238,6 +286,33 @@ export const useProjectStore = create<ProjectState>((set) => ({
         future: [],
       };
     }),
+  toggleTrackLocked: (trackId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        tracks: state.project.tracks.map((t) =>
+          t.id === trackId ? { ...t, locked: !t.locked } : t
+        ),
+      },
+    })),
+  toggleTrackHidden: (trackId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        tracks: state.project.tracks.map((t) =>
+          t.id === trackId ? { ...t, hidden: !t.hidden } : t
+        ),
+      },
+    })),
+  toggleTrackMuted: (trackId) =>
+    set((state) => ({
+      project: {
+        ...state.project,
+        tracks: state.project.tracks.map((t) =>
+          t.id === trackId ? { ...t, muted: !t.muted } : t
+        ),
+      },
+    })),
   pushHistory: () =>
     set((state) => ({
       past: pushHistoryEntry(state.past, state.project),
@@ -252,6 +327,7 @@ export const useProjectStore = create<ProjectState>((set) => ({
         past: state.past.slice(0, -1),
         future: [state.project, ...state.future],
         selectedClipId: null,
+        selectedClipIds: [],
       };
     }),
   redo: () =>
@@ -263,15 +339,17 @@ export const useProjectStore = create<ProjectState>((set) => ({
         past: pushHistoryEntry(state.past, state.project),
         future: state.future.slice(1),
         selectedClipId: null,
+        selectedClipIds: [],
       };
     }),
 
   loadProject: (project) =>
-    set({ project, selectedClipId: null, playheadTime: 0, past: [], future: [] }),
+    set({ project, selectedClipId: null, selectedClipIds: [], playheadTime: 0, past: [], future: [] }),
   resetProject: () =>
     set({
       project: emptyProject(),
       selectedClipId: null,
+      selectedClipIds: [],
       playheadTime: 0,
       past: [],
       future: [],

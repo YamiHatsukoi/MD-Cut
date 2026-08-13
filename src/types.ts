@@ -53,6 +53,8 @@ export interface Clip {
     outlineEnabled?: boolean;
     outlineColor?: string;
     outlineWidth?: number;
+    animation?: TextAnimation;
+    animationDuration?: number;
   };
   transform?: {
     x: number;
@@ -61,17 +63,31 @@ export interface Clip {
     rotation: number;
   };
   volume?: number;
+  /** Playback speed multiplier (1 = normal). Only meaningful for video/audio clips. */
+  speed?: number;
 }
+
+export type TextAnimation = "none" | "slide" | "zoom";
 
 export interface Track {
   id: string;
   type: TrackType;
   name: string;
   clips: Clip[];
+  locked?: boolean;
+  hidden?: boolean;
+  muted?: boolean;
 }
 
 export type ExportFormat = "mp4" | "mov" | "webm";
-export type ExportResolution = "720p" | "1080p" | "4k";
+export type ExportResolution =
+  | "720p"
+  | "1080p"
+  | "4k"
+  | "1080p-9x16"
+  | "720p-9x16"
+  | "1080p-1x1"
+  | "720p-1x1";
 
 export interface ExportSettings {
   format: ExportFormat;

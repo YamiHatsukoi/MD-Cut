@@ -38,6 +38,17 @@ export interface ExportVideoClipInput {
   scale?: number;
   xPct?: number;
   yPct?: number;
+  /** Degrees, clockwise. 0 = unchanged. */
+  rotation?: number;
+  /** -100..100, 0 = unchanged. */
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
+  /** Playback speed multiplier. 1 = unchanged. */
+  speed?: number;
+  /** Forces this clip's own audio out of the mix even if the source has one
+   * (used when its track is muted). */
+  muted?: boolean;
 }
 
 /** A clip from the separate Audio track, mixed on top of the video's own
@@ -51,6 +62,8 @@ export interface ExportAudioOverlayInput {
   fadeIn?: number;
   fadeOut?: number;
   fadeOutHold?: number;
+  /** Playback speed multiplier. 1 = unchanged. */
+  speed?: number;
 }
 
 /** A clip from the Text track. `fontFile` must already be resolved to a
@@ -73,6 +86,8 @@ export interface ExportTextOverlayInput {
   outlineEnabled?: boolean;
   outlineColor?: string;
   outlineWidth?: number;
+  animation?: "none" | "slide" | "zoom";
+  animationDuration?: number;
 }
 
 /** A clip from the Image track. */
@@ -86,6 +101,10 @@ export interface ExportImageOverlayInput {
   fadeIn?: number;
   fadeOut?: number;
   fadeOutHold?: number;
+  rotation?: number;
+  brightness?: number;
+  contrast?: number;
+  saturation?: number;
 }
 
 export interface ExportOptions {
@@ -102,6 +121,10 @@ const RESOLUTIONS: Record<ExportResolution, { width: number; height: number }> =
   "720p": { width: 1280, height: 720 },
   "1080p": { width: 1920, height: 1080 },
   "4k": { width: 3840, height: 2160 },
+  "1080p-9x16": { width: 1080, height: 1920 },
+  "720p-9x16": { width: 720, height: 1280 },
+  "1080p-1x1": { width: 1080, height: 1080 },
+  "720p-1x1": { width: 720, height: 720 },
 };
 
 const CODECS: Record<ExportFormat, { video: string; audio: string }> = {
@@ -116,6 +139,48 @@ const CODECS: Record<ExportFormat, { video: string; audio: string }> = {
  * escaping since `:` separates filter options. */
 function escapeFilterPath(p: string): string {
   return p.replace(/\\/g, "/").replace(/:/g, "\\:");
+}
+
+/** Converts degrees to a radians string for ffmpeg's `rotate` filter. */
+function degToRad(deg: number): string {
+  return (deg * (Math.PI / 180)).toFixed(6);
+}
+
+/** `eq=brightness=..:contrast=..:saturation=..` fragment (without the
+ * leading comma) built from our -100..100 UI scale, or "" if all-zero. */
+function eqFilterFragment(brightness = 0, contrast = 0, saturation = 0): string {
+  if (brightness === 0 && contrast === 0 && saturation === 0) return "";
+  const b = Math.max(-1, Math.min(1, brightness / 100)).toFixed(3);
+  const c = Math.max(0, 1 + contrast / 100).toFixed(3);
+  const s = Math.max(0, 1 + saturation / 100).toFixed(3);
+  return `,eq=brightness=${b}:contrast=${c}:saturation=${s}`;
+}
+
+/** Decomposes an arbitrary speed multiplier into a chain of `atempo` stages,
+ * since a single `atempo` only accepts 0.5..2.0. */
+function atempoChain(speed: number): string {
+  const factors: number[] = [];
+  let remaining = speed;
+  while (remaining > 2) {
+    factors.push(2);
+    remaining /= 2;
+  }
+  while (remaining < 0.5) {
+    factors.push(0.5);
+    remaining /= 0.5;
+  }
+  factors.push(remaining);
+  return factors.map((f) => `atempo=${f.toFixed(6)}`).join(",");
+}
+
+/** ffmpeg expression (0..1) for a slide/zoom text animation: ramps up over
+ * `animDur` seconds after `start`, holds at 1, ramps back down over
+ * `animDur` seconds before `end`. Inner commas are escaped since this sits
+ * inside a single drawtext option value. */
+function textAnimProgressExpr(start: number, end: number, animDur: number): string {
+  const inP = `min(1\\,max(0\\,(t-${start})/${animDur}))`;
+  const outP = `min(1\\,max(0\\,(${end}-t)/${animDur}))`;
+  return `min(${inP}\\,${outP})`;
 }
 
 /** Local (0-based) start time for a fade-out ramp so it finishes `hold`
@@ -192,7 +257,8 @@ export function buildFfmpegArgs(
     if (seg.type === "single") {
       const c = seg.a;
       const i = seg.aIndex;
-      const clipDuration = c.trimOut - c.trimIn;
+      const speed = c.speed ?? 1;
+      const clipDuration = (c.trimOut - c.trimIn) / speed;
       const fadeIn = c.fadeIn ?? 0;
       const fadeOut = c.fadeOut ?? 0;
       const vScale = c.scale ?? 1;
@@ -200,9 +266,13 @@ export function buildFfmpegArgs(
       const vYPct = c.yPct ?? 50;
       const targetW = Math.max(2, Math.round(width * vScale));
       const targetH = Math.max(2, Math.round(height * vScale));
-      let chain =
-        `[${i}:v]trim=start=${c.trimIn}:end=${c.trimOut},setpts=PTS-STARTPTS+${c.timelineStart}/TB,` +
-        `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+      let chain = `[${i}:v]trim=start=${c.trimIn}:end=${c.trimOut},setpts=(PTS-STARTPTS)`;
+      if (speed !== 1) chain += `/${speed}`;
+      chain += `+${c.timelineStart}/TB,`;
+      chain += `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
+      chain += eqFilterFragment(c.brightness, c.contrast, c.saturation);
+      chain += `,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+      if (c.rotation) chain += `,rotate=${degToRad(c.rotation)}`;
       if (fadeIn > 0) chain += `,fade=t=in:st=${c.timelineStart}:d=${fadeIn}`;
       if (fadeOut > 0) {
         const st = c.timelineStart + fadeOutStart(clipDuration, fadeOut, c.fadeOutHold ?? 0);
@@ -229,7 +299,10 @@ export function buildFfmpegArgs(
       const vYPct = c.yPct ?? 50;
       const targetW = Math.max(2, Math.round(width * vScale));
       const targetH = Math.max(2, Math.round(height * vScale));
-      const scaleChain = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+      let scaleChain = `scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease`;
+      scaleChain += eqFilterFragment(c.brightness, c.contrast, c.saturation);
+      scaleChain += `,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2`;
+      if (c.rotation) scaleChain += `,rotate=${degToRad(c.rotation)}`;
       filterParts.push(
         `[${i}:v]trim=start=${c.trimIn}:end=${c.trimOut},setpts=PTS-STARTPTS,${scaleChain}[xa${segIdx}]`
       );
@@ -257,7 +330,10 @@ export function buildFfmpegArgs(
     const fadeOut = img.fadeOut ?? 0;
     let chain =
       `[${inputIdx}:v]trim=duration=${imgDuration},setpts=PTS-STARTPTS+${img.timelineStart}/TB,` +
-      `scale=${targetW}:-2,format=rgba`;
+      `scale=${targetW}:-2`;
+    chain += eqFilterFragment(img.brightness, img.contrast, img.saturation);
+    chain += `,format=rgba`;
+    if (img.rotation) chain += `,rotate=${degToRad(img.rotation)}:fillcolor=black@0.0`;
     if (fadeIn > 0) chain += `,fade=t=in:st=${img.timelineStart}:d=${fadeIn}:alpha=1`;
     if (fadeOut > 0) {
       const st = img.timelineStart + fadeOutStart(imgDuration, fadeOut, img.fadeOutHold ?? 0);
@@ -276,13 +352,25 @@ export function buildFfmpegArgs(
     const fontFile = escapeFilterPath(txt.fontFile);
     const textFile = escapeFilterPath(txt.textFilePath);
     const next = `vbase${stage++}`;
+    const animation = txt.animation ?? "none";
+    const animDur = txt.animationDuration ?? 0.4;
+    let fontSizeExpr = `${txt.fontSize}`;
+    let yExpr = `(h*${txt.yPct}/100)-text_h/2`;
+    if (animation !== "none") {
+      const progress = textAnimProgressExpr(txt.timelineStart, txt.timelineEnd, animDur);
+      if (animation === "zoom") {
+        fontSizeExpr = `max(1\\,round(${txt.fontSize}*(0.4+0.6*${progress})))`;
+      } else if (animation === "slide") {
+        yExpr = `(h*${txt.yPct}/100)-text_h/2+((1-(${progress}))*h*0.15)`;
+      }
+    }
     const opts = [
       `fontfile='${fontFile}'`,
       `textfile='${textFile}'`,
-      `fontsize=${txt.fontSize}`,
+      `fontsize=${fontSizeExpr}`,
       `fontcolor=${txt.color}`,
       `x=(w*${txt.xPct}/100)-text_w/2`,
-      `y=(h*${txt.yPct}/100)-text_h/2`,
+      `y=${yExpr}`,
       `enable='between(t,${txt.timelineStart},${txt.timelineEnd})'`,
     ];
     if (txt.shadowEnabled) {
@@ -305,11 +393,13 @@ export function buildFfmpegArgs(
   const audioLabels = ["abase"];
 
   videoClips.forEach((c, i) => {
-    if (c.hasAudio === false) return;
-    const clipDuration = c.trimOut - c.trimIn;
+    if (c.hasAudio === false || c.muted) return;
+    const speed = c.speed ?? 1;
+    const clipDuration = (c.trimOut - c.trimIn) / speed;
     const fadeIn = c.fadeIn ?? 0;
     const fadeOut = c.fadeOut ?? 0;
     let chain = `[${i}:a]atrim=start=${c.trimIn}:end=${c.trimOut},asetpts=PTS-STARTPTS`;
+    if (speed !== 1) chain += `,${atempoChain(speed)}`;
     if (fadeIn > 0) chain += `,afade=t=in:st=0:d=${fadeIn}`;
     if (fadeOut > 0) {
       const st = fadeOutStart(clipDuration, fadeOut, c.fadeOutHold ?? 0);
@@ -324,11 +414,13 @@ export function buildFfmpegArgs(
 
   audioOverlays.forEach((a, k) => {
     const inputIdx = audioInputBase + k;
-    const clipDuration = a.trimOut - a.trimIn;
+    const speed = a.speed ?? 1;
+    const clipDuration = (a.trimOut - a.trimIn) / speed;
     const volume = a.volume ?? 1;
     const fadeIn = a.fadeIn ?? 0;
     const fadeOut = a.fadeOut ?? 0;
     let chain = `[${inputIdx}:a]atrim=start=${a.trimIn}:end=${a.trimOut},asetpts=PTS-STARTPTS`;
+    if (speed !== 1) chain += `,${atempoChain(speed)}`;
     if (volume !== 1) chain += `,volume=${volume}`;
     if (fadeIn > 0) chain += `,afade=t=in:st=0:d=${fadeIn}`;
     if (fadeOut > 0) {

@@ -40,6 +40,9 @@ function TimelineTrackRow({
   const addClipToTrack = useProjectStore((s) => s.addClipToTrack);
   const transitions = useProjectStore((s) => s.project.transitions);
   const toggleTransition = useProjectStore((s) => s.toggleTransition);
+  const toggleTrackLocked = useProjectStore((s) => s.toggleTrackLocked);
+  const toggleTrackHidden = useProjectStore((s) => s.toggleTrackHidden);
+  const toggleTrackMuted = useProjectStore((s) => s.toggleTrackMuted);
 
   // Dropping an asset anywhere on the timeline routes it to the matching
   // track by kind (video/audio/image) — the user doesn't have to hit the
@@ -78,13 +81,43 @@ function TimelineTrackRow({
   }
 
   return (
-    <div className={`timeline-track track-${track.type}`}>
-      <span className="track-label">{t(trackLabelKey(track.type))}</span>
+    <div className={`timeline-track track-${track.type}${track.hidden ? " track-hidden" : ""}`}>
+      <span className="track-label">
+        {t(trackLabelKey(track.type))}
+        <span className="track-controls">
+          <button
+            type="button"
+            className={`track-ctrl-btn${track.locked ? " active" : ""}`}
+            title={track.locked ? t("trackLockOn") : t("trackLockOff")}
+            onClick={() => toggleTrackLocked(track.id)}
+          >
+            {track.locked ? "🔒" : "🔓"}
+          </button>
+          <button
+            type="button"
+            className={`track-ctrl-btn${track.hidden ? " active" : ""}`}
+            title={track.hidden ? t("trackHideOn") : t("trackHideOff")}
+            onClick={() => toggleTrackHidden(track.id)}
+          >
+            {track.hidden ? "🙈" : "👁"}
+          </button>
+          {(track.type === "audio" || track.type === "video") && (
+            <button
+              type="button"
+              className={`track-ctrl-btn${track.muted ? " active" : ""}`}
+              title={track.muted ? t("trackMuteOn") : t("trackMuteOff")}
+              onClick={() => toggleTrackMuted(track.id)}
+            >
+              {track.muted ? "🔇" : "🔊"}
+            </button>
+          )}
+        </span>
+      </span>
       <div
-        className="track-clips-area"
+        className={`track-clips-area${track.locked ? " track-locked" : ""}`}
         style={{ width }}
         onDragOver={(e) => e.preventDefault()}
-        onDrop={handleDrop}
+        onDrop={track.locked ? undefined : handleDrop}
       >
         {track.clips.map((clip) => (
           <TimelineClip key={clip.id} clip={clip} track={track} />
@@ -97,7 +130,7 @@ function TimelineTrackRow({
               type="button"
               className={`transition-btn${hasTransition ? " active" : ""}`}
               style={{ left: a.timelineEnd * pixelsPerSecond }}
-              title={hasTransition ? "Bỏ hiệu ứng chuyển cảnh" : "Thêm hiệu ứng dissolve"}
+              title={hasTransition ? t("removeTransition") : t("addTransition")}
               onClick={(e) => {
                 e.stopPropagation();
                 toggleTransition(a.id);
@@ -156,7 +189,11 @@ export function Timeline() {
   const zoomIn = useUiStore((s) => s.zoomIn);
   const zoomOut = useUiStore((s) => s.zoomOut);
   const timelineHeight = useLayoutStore((s) => s.timelineHeight);
-  const setTimelineHeight = useLayoutStore((s) => s.setTimelineHeight);
+  const resizeTimelineHeight = useLayoutStore((s) => s.resizeTimelineHeight);
+  const rippleEnabled = useProjectStore((s) => s.rippleEnabled);
+  const setRippleEnabled = useProjectStore((s) => s.setRippleEnabled);
+  const selectedClipIds = useProjectStore((s) => s.selectedClipIds);
+  const deleteSelectedClips = useProjectStore((s) => s.deleteSelectedClips);
   const pixelsPerSecond = BASE_PIXELS_PER_SECOND * zoom;
 
   const totalDuration = Math.max(getProjectDuration(tracks), MIN_TIMELINE_SECONDS);
@@ -193,19 +230,31 @@ export function Timeline() {
     <section className="timeline" style={{ flexBasis: timelineHeight }}>
       <ResizeHandle
         direction="vertical"
-        onResize={(delta) => setTimelineHeight(timelineHeight - delta)}
+        onResize={(delta) => resizeTimelineHeight(-delta)}
       />
       <div className="timeline-toolbar">
         <button className="text-btn" disabled={!selectedClipId} onClick={handleSplit}>
-          ✂ Split
+          {t("splitBtn")}
         </button>
+        <button
+          className={`text-btn${rippleEnabled ? " active" : ""}`}
+          title={t("rippleTooltip")}
+          onClick={() => setRippleEnabled(!rippleEnabled)}
+        >
+          {t("rippleBtn")}
+        </button>
+        {selectedClipIds.length > 1 && (
+          <button className="text-btn" onClick={deleteSelectedClips}>
+            {t("deleteSelectedClips").replace("{n}", String(selectedClipIds.length))}
+          </button>
+        )}
         <span className="playhead-time">{formatTime(playheadTime)}</span>
         <div className="zoom-controls">
-          <button className="text-btn zoom-btn" onClick={zoomOut} title="Thu nhỏ timeline">
+          <button className="text-btn zoom-btn" onClick={zoomOut} title={t("zoomOutTooltip")}>
             −
           </button>
           <span className="zoom-level">{Math.round(zoom * 100)}%</span>
-          <button className="text-btn zoom-btn" onClick={zoomIn} title="Phóng to timeline">
+          <button className="text-btn zoom-btn" onClick={zoomIn} title={t("zoomInTooltip")}>
             +
           </button>
         </div>

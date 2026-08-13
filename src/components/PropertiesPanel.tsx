@@ -7,8 +7,10 @@ import {
   getFadeOutHoldDuration,
   withFadeDuration,
   withFadeOutHold,
+  getColorAdjust,
+  withColorAdjust,
 } from "../lib/effects";
-import type { Clip } from "../types";
+import type { Clip, TextAnimation } from "../types";
 
 const GENERIC_FONTS = ["sans-serif", "serif", "monospace"];
 
@@ -54,24 +56,25 @@ export function PropertiesPanel() {
   const fadeIn = getFadeInDuration(clip);
   const fadeOut = getFadeOutDuration(clip);
   const fadeOutHold = getFadeOutHoldDuration(clip);
+  const colorAdjust = getColorAdjust(clip);
 
   return (
     <aside className="properties-panel">
       <h3>{t("properties")}</h3>
       <div className="properties-content">
         <div className="prop-row">
-          <span className="prop-label">Label</span>
+          <span className="prop-label">{t("propLabel")}</span>
           <span>{clip.label}</span>
         </div>
         <div className="prop-row">
-          <span className="prop-label">Duration</span>
+          <span className="prop-label">{t("propDuration")}</span>
           <span>{(clip.timelineEnd - clip.timelineStart).toFixed(1)}s</span>
         </div>
 
         {clip.text && (
           <>
             <label className="field">
-              <span>Text</span>
+              <span>{t("textContent")}</span>
               <input
                 type="text"
                 value={clip.text.content}
@@ -82,7 +85,7 @@ export function PropertiesPanel() {
               />
             </label>
             <label className="field">
-              <span>Font</span>
+              <span>{t("fontLabel")}</span>
               <select
                 value={clip.text.fontFamily}
                 onFocus={pushHistoryOnFocus}
@@ -101,14 +104,11 @@ export function PropertiesPanel() {
               </select>
             </label>
             {customFontNames.length === 0 && (
-              <p className="hint">
-                Bỏ file font (.ttf/.otf) vào thư mục "fonts" cạnh MD-Cut.exe rồi mở lại app để
-                dùng font riêng.
-              </p>
+              <p className="hint">{t("customFontHint")}</p>
             )}
             <div className="field-row">
               <label className="field">
-                <span>Size</span>
+                <span>{t("sizeLabel")}</span>
                 <input
                   type="number"
                   min={8}
@@ -124,7 +124,7 @@ export function PropertiesPanel() {
                 />
               </label>
               <label className="field">
-                <span>Color</span>
+                <span>{t("colorLabel")}</span>
                 <input
                   type="color"
                   value={clip.text.color}
@@ -137,7 +137,7 @@ export function PropertiesPanel() {
             </div>
             <div className="field-row">
               <label className="field">
-                <span>X %</span>
+                <span>{t("xPctLabel")}</span>
                 <input
                   type="number"
                   min={0}
@@ -150,7 +150,7 @@ export function PropertiesPanel() {
                 />
               </label>
               <label className="field">
-                <span>Y %</span>
+                <span>{t("yPctLabel")}</span>
                 <input
                   type="number"
                   min={0}
@@ -163,6 +163,42 @@ export function PropertiesPanel() {
                 />
               </label>
             </div>
+            <label className="field">
+              <span>{t("textAnimationLabel")}</span>
+              <select
+                value={clip.text.animation ?? "none"}
+                onFocus={pushHistoryOnFocus}
+                onChange={(e) =>
+                  patchClip((c) => ({
+                    ...c,
+                    text: { ...c.text!, animation: e.target.value as TextAnimation },
+                  }))
+                }
+              >
+                <option value="none">{t("animNone")}</option>
+                <option value="slide">{t("animSlide")}</option>
+                <option value="zoom">{t("animZoom")}</option>
+              </select>
+            </label>
+            {(clip.text.animation ?? "none") !== "none" && (
+              <label className="field">
+                <span>{t("animDurationLabel")}</span>
+                <input
+                  type="number"
+                  min={0.1}
+                  max={5}
+                  step={0.1}
+                  value={clip.text.animationDuration ?? 0.4}
+                  onFocus={pushHistoryOnFocus}
+                  onChange={(e) =>
+                    patchClip((c) => ({
+                      ...c,
+                      text: { ...c.text!, animationDuration: Number(e.target.value) || 0.1 },
+                    }))
+                  }
+                />
+              </label>
+            )}
             <label className="field checkbox-field">
               <input
                 type="checkbox"
@@ -175,12 +211,12 @@ export function PropertiesPanel() {
                   }))
                 }
               />
-              <span>Đổ bóng (Shadow)</span>
+              <span>{t("shadowLabel")}</span>
             </label>
             {clip.text.shadowEnabled && (
               <div className="field-row">
                 <label className="field">
-                  <span>Màu bóng</span>
+                  <span>{t("shadowColorLabel")}</span>
                   <input
                     type="color"
                     value={clip.text.shadowColor ?? "#000000"}
@@ -191,7 +227,7 @@ export function PropertiesPanel() {
                   />
                 </label>
                 <label className="field">
-                  <span>Lệch X</span>
+                  <span>{t("offsetXLabel")}</span>
                   <input
                     type="number"
                     value={clip.text.shadowOffsetX ?? 2}
@@ -205,7 +241,7 @@ export function PropertiesPanel() {
                   />
                 </label>
                 <label className="field">
-                  <span>Lệch Y</span>
+                  <span>{t("offsetYLabel")}</span>
                   <input
                     type="number"
                     value={clip.text.shadowOffsetY ?? 2}
@@ -233,12 +269,12 @@ export function PropertiesPanel() {
                   }))
                 }
               />
-              <span>Viền chữ (Outline)</span>
+              <span>{t("outlineLabel")}</span>
             </label>
             {clip.text.outlineEnabled && (
               <div className="field-row">
                 <label className="field">
-                  <span>Màu viền</span>
+                  <span>{t("outlineColorLabel")}</span>
                   <input
                     type="color"
                     value={clip.text.outlineColor ?? "#000000"}
@@ -249,7 +285,7 @@ export function PropertiesPanel() {
                   />
                 </label>
                 <label className="field">
-                  <span>Độ dày</span>
+                  <span>{t("outlineWidthLabel")}</span>
                   <input
                     type="number"
                     min={1}
@@ -267,7 +303,7 @@ export function PropertiesPanel() {
               </div>
             )}
 
-            <p className="hint">Kéo chữ trực tiếp trên khung xem trước để đổi vị trí.</p>
+            <p className="hint">{t("dragTextHint")}</p>
           </>
         )}
 
@@ -275,7 +311,7 @@ export function PropertiesPanel() {
           <>
             <div className="field-row">
               <label className="field">
-                <span>Scale</span>
+                <span>{t("scaleLabel")}</span>
                 <input
                   type="number"
                   min={0.1}
@@ -296,10 +332,32 @@ export function PropertiesPanel() {
                   }
                 />
               </label>
+              <label className="field">
+                <span>{t("rotationLabel")}</span>
+                <input
+                  type="number"
+                  min={-180}
+                  max={180}
+                  step={1}
+                  value={Math.round(clip.transform?.rotation ?? 0)}
+                  onFocus={pushHistoryOnFocus}
+                  onChange={(e) =>
+                    patchClip((c) => ({
+                      ...c,
+                      transform: {
+                        x: c.transform?.x ?? 50,
+                        y: c.transform?.y ?? 50,
+                        scale: c.transform?.scale ?? 1,
+                        rotation: Number(e.target.value) || 0,
+                      },
+                    }))
+                  }
+                />
+              </label>
             </div>
             <div className="field-row">
               <label className="field">
-                <span>X %</span>
+                <span>{t("xPctLabel")}</span>
                 <input
                   type="number"
                   min={0}
@@ -320,7 +378,7 @@ export function PropertiesPanel() {
                 />
               </label>
               <label className="field">
-                <span>Y %</span>
+                <span>{t("yPctLabel")}</span>
                 <input
                   type="number"
                   min={0}
@@ -341,13 +399,87 @@ export function PropertiesPanel() {
                 />
               </label>
             </div>
-            <p className="hint">Kéo trực tiếp trên khung xem trước để đổi vị trí.</p>
+            <p className="hint">{t("dragTransformHint")}</p>
+
+            <div className="field">
+              <span>{t("brightnessLabel")} {colorAdjust.brightness}</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={colorAdjust.brightness}
+                onFocus={pushHistoryOnFocus}
+                onChange={(e) =>
+                  patchClip((c) => ({
+                    ...c,
+                    effects: withColorAdjust(c, { brightness: Number(e.target.value) }),
+                  }))
+                }
+              />
+            </div>
+            <div className="field">
+              <span>{t("contrastLabel")} {colorAdjust.contrast}</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={colorAdjust.contrast}
+                onFocus={pushHistoryOnFocus}
+                onChange={(e) =>
+                  patchClip((c) => ({
+                    ...c,
+                    effects: withColorAdjust(c, { contrast: Number(e.target.value) }),
+                  }))
+                }
+              />
+            </div>
+            <div className="field">
+              <span>{t("saturationLabel")} {colorAdjust.saturation}</span>
+              <input
+                type="range"
+                min={-100}
+                max={100}
+                value={colorAdjust.saturation}
+                onFocus={pushHistoryOnFocus}
+                onChange={(e) =>
+                  patchClip((c) => ({
+                    ...c,
+                    effects: withColorAdjust(c, { saturation: Number(e.target.value) }),
+                  }))
+                }
+              />
+            </div>
           </>
+        )}
+
+        {(trackId.startsWith("track-video") || trackId.startsWith("track-audio")) && (
+          <label className="field">
+            <span>{t("speedLabel")} {(clip.speed ?? 1).toFixed(2)}x</span>
+            <input
+              type="range"
+              min={0.25}
+              max={4}
+              step={0.05}
+              value={clip.speed ?? 1}
+              onFocus={pushHistoryOnFocus}
+              onChange={(e) => {
+                const speed = Number(e.target.value) || 1;
+                patchClip((c) => {
+                  const sourceDuration = c.trimOut - c.trimIn;
+                  return {
+                    ...c,
+                    speed,
+                    timelineEnd: c.timelineStart + sourceDuration / speed,
+                  };
+                });
+              }}
+            />
+          </label>
         )}
 
         {trackId.startsWith("track-audio") && (
           <label className="field">
-            <span>Volume</span>
+            <span>{t("volumeLabel")}</span>
             <input
               type="range"
               min={0}
@@ -365,7 +497,7 @@ export function PropertiesPanel() {
           trackId.startsWith("track-image")) && (
           <div className="field-row">
             <label className="field">
-              <span>Fade in (s)</span>
+              <span>{t("fadeInLabel")}</span>
               <input
                 type="number"
                 min={0}
@@ -382,7 +514,7 @@ export function PropertiesPanel() {
               />
             </label>
             <label className="field">
-              <span>Fade out (s)</span>
+              <span>{t("fadeOutLabel")}</span>
               <input
                 type="number"
                 min={0}
@@ -406,7 +538,7 @@ export function PropertiesPanel() {
           trackId.startsWith("track-image")) &&
           fadeOut > 0 && (
             <label className="field">
-              <span>Giữ đen sau khi fade (s)</span>
+              <span>{t("fadeHoldLabel")}</span>
               <input
                 type="number"
                 min={0}

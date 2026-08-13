@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useProjectStore } from "./store/projectStore";
 import { useUiStore, type PanelKind } from "./store/uiStore";
 import { useFontStore } from "./store/fontStore";
@@ -13,6 +13,7 @@ import { ExportDialog } from "./components/ExportDialog";
 import { ResizeHandle } from "./components/ResizeHandle";
 import flagVn from "./assets/flags/vn.png";
 import flagGb from "./assets/flags/gb.png";
+import type { RecentProjectEntry } from "../electron/preload";
 import "./App.css";
 
 function findSelectedClipEntry() {
@@ -45,12 +46,41 @@ function App() {
   const sidebarWidth = useLayoutStore((s) => s.sidebarWidth);
   const mediaPanelWidth = useLayoutStore((s) => s.mediaPanelWidth);
   const propertiesPanelWidth = useLayoutStore((s) => s.propertiesPanelWidth);
-  const setMediaPanelWidth = useLayoutStore((s) => s.setMediaPanelWidth);
-  const setPropertiesPanelWidth = useLayoutStore((s) => s.setPropertiesPanelWidth);
+  const resizeMediaPanelWidth = useLayoutStore((s) => s.resizeMediaPanelWidth);
+  const resizePropertiesPanelWidth = useLayoutStore((s) => s.resizePropertiesPanelWidth);
+
+  const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([]);
+  const [recentMenuOpen, setRecentMenuOpen] = useState(false);
 
   useEffect(() => {
     useFontStore.getState().loadCustomFonts();
   }, []);
+
+  function refreshRecentProjects() {
+    window.mdcut.recentProjectsList().then(setRecentProjects);
+  }
+
+  useEffect(() => {
+    refreshRecentProjects();
+  }, []);
+
+  async function handleOpenRecent(filePath: string) {
+    setRecentMenuOpen(false);
+    const result = await window.mdcut.recentProjectsOpen(filePath);
+    if (!result) {
+      refreshRecentProjects();
+      return;
+    }
+    try {
+      const parsed = JSON.parse(result.json);
+      loadProject(parsed);
+      await window.mdcut.autosaveClear();
+      window.mdcut.recentProjectsAdd(filePath, parsed?.name ?? "Untitled");
+      refreshRecentProjects();
+    } catch {
+      // ignore invalid project file
+    }
+  }
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -103,6 +133,11 @@ function App() {
           state.deleteMediaAsset(state.selectedAssetId);
           return;
         }
+        if (state.selectedClipIds.length > 1) {
+          e.preventDefault();
+          state.deleteSelectedClips();
+          return;
+        }
         const entry = findSelectedClipEntry();
         if (!entry) return;
         e.preventDefault();
@@ -127,7 +162,11 @@ function App() {
   async function handleSave() {
     const json = JSON.stringify(project, null, 2);
     const saved = await window.mdcut.saveProject(json, project.name);
-    if (saved) await window.mdcut.autosaveClear();
+    if (saved) {
+      await window.mdcut.autosaveClear();
+      await window.mdcut.recentProjectsAdd(saved, project.name);
+      refreshRecentProjects();
+    }
   }
 
   async function handleOpen() {
@@ -136,6 +175,8 @@ function App() {
     try {
       loadProject(JSON.parse(result.json));
       await window.mdcut.autosaveClear();
+      await window.mdcut.recentProjectsAdd(result.filePath, JSON.parse(result.json)?.name ?? "Untitled");
+      refreshRecentProjects();
     } catch {
       // ignore invalid project file
     }
@@ -187,6 +228,35 @@ function App() {
           <button className="text-btn" onClick={handleOpen}>
             {t("fileMenuOpen")}
           </button>
+          <div className="recent-projects-wrap">
+            <button
+              className="text-btn"
+              onClick={() => {
+                if (!recentMenuOpen) refreshRecentProjects();
+                setRecentMenuOpen(!recentMenuOpen);
+              }}
+            >
+              {t("recentProjects")} ▾
+            </button>
+            {recentMenuOpen && (
+              <div className="recent-projects-menu" onMouseLeave={() => setRecentMenuOpen(false)}>
+                {recentProjects.length === 0 ? (
+                  <p className="hint">{t("noRecentProjects")}</p>
+                ) : (
+                  recentProjects.map((rp) => (
+                    <button
+                      key={rp.filePath}
+                      className="recent-project-item"
+                      onClick={() => handleOpenRecent(rp.filePath)}
+                      title={rp.filePath}
+                    >
+                      {rp.name}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
           <button className="text-btn" onClick={handleSave}>
             {t("fileMenuSave")}
           </button>
@@ -230,14 +300,14 @@ function App() {
 
         <ResizeHandle
           direction="horizontal"
-          onResize={(delta) => setMediaPanelWidth(mediaPanelWidth + delta)}
+          onResize={(delta) => resizeMediaPanelWidth(delta)}
         />
 
         <PreviewPlayer />
 
         <ResizeHandle
           direction="horizontal"
-          onResize={(delta) => setPropertiesPanelWidth(propertiesPanelWidth - delta)}
+          onResize={(delta) => resizePropertiesPanelWidth(-delta)}
         />
 
         <PropertiesPanel />
