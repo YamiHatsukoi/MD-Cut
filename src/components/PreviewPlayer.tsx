@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { useProjectStore } from "../store/projectStore";
 import { getProjectDuration } from "../lib/projectDuration";
 import { formatTime } from "../lib/format";
@@ -51,12 +51,30 @@ export function PreviewPlayer() {
 
   const activeVideoClip = videoTrack?.hidden ? undefined : findActiveClip(videoTrack?.clips, playheadTime);
   const activeAudioClip = audioTrack?.hidden ? undefined : findActiveClip(audioTrack?.clips, playheadTime);
-  const activeTextClips = textTrack?.hidden
-    ? []
-    : (textTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? []);
-  const activeImageClips = imageTrack?.hidden
-    ? []
-    : (imageTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? []);
+
+  // Memoized so these keep the same array reference (and skip the canvas
+  // redraw effect below) unless the text/image track itself or the playhead
+  // actually changed — otherwise `.filter()` would allocate a new array on
+  // every render of PreviewPlayer, which re-renders on ANY store mutation
+  // anywhere in the app (it subscribes to the whole `project` object). That
+  // was forcing a full canvas redraw (video/image/text, with shadows/
+  // outlines) on every single keystroke typed into any field, unrelated
+  // fields included — enough main-thread work under load to occasionally
+  // make Chromium drop an input event while typing.
+  const activeTextClips = useMemo(
+    () =>
+      textTrack?.hidden
+        ? []
+        : (textTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? []),
+    [textTrack, playheadTime]
+  );
+  const activeImageClips = useMemo(
+    () =>
+      imageTrack?.hidden
+        ? []
+        : (imageTrack?.clips.filter((c) => playheadTime >= c.timelineStart && playheadTime < c.timelineEnd) ?? []),
+    [imageTrack, playheadTime]
+  );
 
   const activeVideoAsset = activeVideoClip
     ? project.mediaLibrary.find((a) => a.id === activeVideoClip.assetId)
