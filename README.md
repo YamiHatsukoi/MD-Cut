@@ -6,6 +6,12 @@
 
 🇻🇳 [Tiếng Việt](#-tiếng-việt) &nbsp;|&nbsp; 🇬🇧 [English](#-english)
 
+### 📥 Tải về / Download
+
+**VI:** Vào trang [Releases](https://github.com/YamiHatsukoi/MD-Cut/releases/tag/Release), tải file `MD-Cut Portable x.x.x.zip` mới nhất, giải nén ra rồi chạy `MD-Cut.exe` bên trong — không cần cài đặt gì thêm. Nhớ giữ nguyên cả thư mục sau khi giải nén (đừng tách riêng file `.exe` ra), vì nó cần các file đi kèm bên cạnh.
+
+**EN:** Go to the [Releases](https://github.com/YamiHatsukoi/MD-Cut/releases/tag/Release) page, download the latest `MD-Cut Portable x.x.x.zip`, extract it, and run `MD-Cut.exe` inside — no installation needed. Keep the whole extracted folder together (don't move the `.exe` out on its own) since it needs its neighboring files.
+
 </div>
 
 ---
