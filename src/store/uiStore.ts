@@ -3,7 +3,7 @@ import { create } from "zustand";
 export type PanelKind = "media" | "audio" | "text" | "image";
 
 export const BASE_PIXELS_PER_SECOND = 40;
-const MIN_ZOOM = 0.25;
+const MIN_ZOOM = 0.001;
 const MAX_ZOOM = 4;
 
 interface UiState {
@@ -25,7 +25,7 @@ export const useUiStore = create<UiState>((set) => ({
   zoom: 1,
   setZoom: (zoom) => set({ zoom: Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, zoom)) }),
   zoomIn: () =>
-    set((s) => ({ zoom: Math.min(MAX_ZOOM, Math.round(s.zoom * 1.25 * 100) / 100) })),
+    set((s) => ({ zoom: Math.min(MAX_ZOOM, Math.round(s.zoom * 1.25 * 10000) / 10000) })),
   zoomOut: () =>
-    set((s) => ({ zoom: Math.max(MIN_ZOOM, Math.round((s.zoom / 1.25) * 100) / 100) })),
+    set((s) => ({ zoom: Math.max(MIN_ZOOM, Math.round((s.zoom / 1.25) * 10000) / 10000) })),
 }));

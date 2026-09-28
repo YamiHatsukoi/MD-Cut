@@ -489,7 +489,8 @@ export async function runExport(
   textOverlays: ExportTextOverlayInput[],
   imageOverlays: ExportImageOverlayInput[],
   options: ExportOptions,
-  onProgress?: (ratio: number) => void
+  onProgress?: (ratio: number) => void,
+  signal?: AbortSignal
 ): Promise<void> {
   const audioCache = new Map<string, boolean>();
   const resolvedClips: ExportVideoClipInput[] = [];
@@ -512,8 +513,18 @@ export async function runExport(
       reject(new Error("ffmpeg binary not found"));
       return;
     }
+    if (signal?.aborted) {
+      reject(new Error("Export aborted"));
+      return;
+    }
     const proc = spawn(ffmpegPath, args);
     let stderr = "";
+
+    // Kill ffmpeg if the export is aborted (e.g. the window was closed).
+    const onAbort = () => {
+      if (proc.exitCode === null) proc.kill();
+    };
+    signal?.addEventListener("abort", onAbort, { once: true });
 
     proc.stderr.on("data", (chunk: Buffer) => {
       const text = chunk.toString();
@@ -521,13 +532,23 @@ export async function runExport(
       const match = text.match(/time=(\d{2}:\d{2}:\d{2}\.\d{2})/);
       if (match && onProgress && totalDuration > 0) {
         const elapsed = parseTimeToSeconds(match[1]);
-        onProgress(Math.min(elapsed / totalDuration, 1));
+        try {
+          onProgress(Math.min(elapsed / totalDuration, 1));
+        } catch {
+          // A progress-report failure must never crash the main process.
+        }
       }
     });
 
-    proc.on("error", reject);
+    proc.on("error", (err) => {
+      signal?.removeEventListener("abort", onAbort);
+      reject(err);
+    });
     proc.on("close", (code) => {
-      if (code === 0) {
+      signal?.removeEventListener("abort", onAbort);
+      if (signal?.aborted) {
+        reject(new Error("Export aborted"));
+      } else if (code === 0) {
         onProgress?.(1);
         resolve();
       } else {

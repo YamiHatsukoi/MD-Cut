@@ -221,6 +221,12 @@ ipcMain.handle(
       };
     });
 
+    const sender = event.sender;
+    const controller = new AbortController();
+    // If the window is closed/reloaded mid-export, stop ffmpeg.
+    const abortExport = () => controller.abort();
+    sender.once("destroyed", abortExport);
+
     try {
       await runExport(
         videoClips,
@@ -229,10 +235,14 @@ ipcMain.handle(
         imageOverlays,
         { ...settings, outputPath: result.filePath },
         (ratio) => {
-          event.sender.send("export:progress", ratio);
-        }
+          if (!sender.isDestroyed()) {
+            sender.send("export:progress", ratio);
+          }
+        },
+        controller.signal
       );
     } finally {
+      if (!sender.isDestroyed()) sender.removeListener("destroyed", abortExport);
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
     shell.showItemInFolder(result.filePath);

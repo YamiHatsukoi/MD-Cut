@@ -253,7 +253,9 @@ export function Timeline() {
           <button className="text-btn zoom-btn" onClick={zoomOut} title={t("zoomOutTooltip")}>
             −
           </button>
-          <span className="zoom-level">{Math.round(zoom * 100)}%</span>
+          <span className="zoom-level">
+            {zoom * 100 < 10 ? (zoom * 100).toFixed(1) : Math.round(zoom * 100)}%
+          </span>
           <button className="text-btn zoom-btn" onClick={zoomIn} title={t("zoomInTooltip")}>
             +
           </button>

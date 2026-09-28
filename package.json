@@ -1,7 +1,7 @@
 {
   "name": "md-cut",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Basic CapCut-like video editor (cut, text, audio, image overlay)",
   "main": "dist-electron/main.js",
   "scripts": {
